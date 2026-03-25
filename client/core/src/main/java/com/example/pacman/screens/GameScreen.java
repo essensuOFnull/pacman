@@ -19,16 +19,13 @@ public class GameScreen implements Screen {
     private final SpriteBatch batch;
     private final NetworkClient client;
     private MapData mapData;
-    private Texture redBlock, greenBlock, blueBlock, pacmanTexture;
+    private Texture redBlock, greenBlock, blueBlock, pacman0, pacman1;
     private int cellSize = 32;
     private Map<Integer, Vector2> visualPositions = new HashMap<>();
     private Map<Integer, Integer> targetDirections = new HashMap<>();
     private Map<Integer, Vector2> targetPositions = new HashMap<>();
     private boolean mapLoaded = false;
-
-    private Texture[] pacmanFrames = new Texture[2];
     private float animationTimer = 0;
-    private int currentFrame = 0;
 
     public GameScreen(NetworkClient client) {
         this.client = client;
@@ -37,9 +34,8 @@ public class GameScreen implements Screen {
         redBlock = new Texture("red_block.png");
         greenBlock = new Texture("green_block.png");
         blueBlock = new Texture("blue_block.png");
-
-        pacmanFrames[0] = new Texture("pacman0.png");
-        pacmanFrames[1] = new Texture("pacman1.png");
+        pacman0 = new Texture("pacman0.png");
+        pacman1 = new Texture("pacman1.png");
     }
 
     public void setMap(MapData map) {
@@ -69,7 +65,7 @@ public class GameScreen implements Screen {
     public void render(float delta) {
         if (!mapLoaded) return;
 
-        // Отправка нажатий
+        // Отправка нажатий клавиш
         int mask = 0;
         if (Gdx.input.isKeyPressed(Input.Keys.UP))    mask |= 1;
         if (Gdx.input.isKeyPressed(Input.Keys.DOWN))  mask |= 2;
@@ -77,7 +73,7 @@ public class GameScreen implements Screen {
         if (Gdx.input.isKeyPressed(Input.Keys.RIGHT)) mask |= 8;
         client.sendKeys(mask);
 
-        // Плавное перемещение визуальных позиций
+        // Плавная интерполяция позиций
         for (Map.Entry<Integer, Vector2> entry : visualPositions.entrySet()) {
             int id = entry.getKey();
             Vector2 visual = entry.getValue();
@@ -87,6 +83,11 @@ public class GameScreen implements Screen {
                 if (visual.dst(target) < 0.1f) visual.set(target);
             }
         }
+
+        // Анимация рта
+        animationTimer += delta;
+        if (animationTimer > 0.1f) animationTimer -= 0.1f;
+        Texture pacTex = (animationTimer < 0.05f) ? pacman0 : pacman1;
 
         // Отрисовка
         ScreenUtils.clear(0, 0, 0, 1);
@@ -99,22 +100,30 @@ public class GameScreen implements Screen {
             for (int x = 0; x < mapData.getWidth(); x++) {
                 TileType tile = mapData.getTile(x, y);
                 Texture tex = null;
-                if (tile == TileType.WALL) tex = redBlock; // можно выбирать по цвету
+                if (tile == TileType.RED_WALL) tex = redBlock;
+                else if (tile == TileType.GREEN_WALL) tex = greenBlock;
+                else if (tile == TileType.BLUE_WALL) tex = blueBlock;
                 if (tex != null) {
                     batch.draw(tex, x * cellSize, y * cellSize, cellSize, cellSize);
                 }
             }
         }
 
-        animationTimer += delta;
-        if (animationTimer >= 0.2f) {
-            animationTimer = 0;
-            currentFrame = (currentFrame + 1) % 2;
-        }
-        Texture pacmanTexture = pacmanFrames[currentFrame];
-        // Пакманы
-        for (Vector2 pos : visualPositions.values()) {
-            batch.draw(pacmanTexture, pos.x, pos.y, cellSize, cellSize);
+        // Пакманы с поворотом
+        for (Map.Entry<Integer, Vector2> entry : visualPositions.entrySet()) {
+            int id = entry.getKey();
+            Vector2 pos = entry.getValue();
+            int dir = targetDirections.getOrDefault(id, 1); // по умолчанию вправо
+            float rotation = 0;
+            switch (dir) {
+                case 0: rotation = 90; break;   // вверх
+                case 1: rotation = 0; break;    // вправо
+                case 2: rotation = 270; break;  // вниз
+                case 3: rotation = 180; break;  // влево
+            }
+            batch.draw(pacTex, pos.x, pos.y, cellSize/2f, cellSize/2f,
+                    cellSize, cellSize, 1, 1, rotation, 0, 0,
+                    pacTex.getWidth(), pacTex.getHeight(), false, false);
         }
 
         batch.end();
@@ -130,6 +139,7 @@ public class GameScreen implements Screen {
         redBlock.dispose();
         greenBlock.dispose();
         blueBlock.dispose();
-        pacmanTexture.dispose();
+        pacman0.dispose();
+        pacman1.dispose();
     }
 }

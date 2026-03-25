@@ -1,19 +1,24 @@
 package com.example.pacman.model;
 
 public enum TileType {
-    EMPTY,      // проходимо
-    WALL,       // непроходимо
-    SPAWN;      // проходимо, точка спавна
+    EMPTY,
+    RED_WALL,
+    GREEN_WALL,
+    BLUE_WALL,
+    SPAWN;
 
     public static TileType fromChar(char c) {
         switch (c) {
             case '.': return EMPTY;
             case 's': return SPAWN;
-            default:  return WALL; // r,g,b - всё стены
+            case 'r': return RED_WALL;
+            case 'g': return GREEN_WALL;
+            case 'b': return BLUE_WALL;
+            default:  return RED_WALL; // на всякий случай
         }
     }
 
     public boolean isWalkable() {
-        return this != WALL;
+        return this == EMPTY || this == SPAWN;
     }
 }
