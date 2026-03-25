@@ -19,6 +19,7 @@ public class GameScreen implements Screen {
     private final SpriteBatch batch;
     private final NetworkClient client;
     private MapData mapData;
+    private int mapHeight;  // сохранённая высота карты
     private Texture redBlock, greenBlock, blueBlock, pacman0, pacman1;
     private int cellSize = 32;
     private Map<Integer, Vector2> visualPositions = new HashMap<>();
@@ -40,6 +41,7 @@ public class GameScreen implements Screen {
 
     public void setMap(MapData map) {
         this.mapData = map;
+        this.mapHeight = map.getHeight();
         camera.setToOrtho(false, map.getWidth() * cellSize, map.getHeight() * cellSize);
         mapLoaded = true;
     }
@@ -49,10 +51,16 @@ public class GameScreen implements Screen {
         String[] parts = updateMsg.split(" ");
         for (int i = 1; i < parts.length; i += 4) {
             int id = Integer.parseInt(parts[i]);
-            int x = Integer.parseInt(parts[i+1]);
-            int y = Integer.parseInt(parts[i+2]);
+            int logicalX = Integer.parseInt(parts[i+1]);
+            int logicalY = Integer.parseInt(parts[i+2]);
             int dir = Integer.parseInt(parts[i+3]);
-            Vector2 newTarget = new Vector2(x * cellSize, y * cellSize);
+
+            // Преобразуем логические координаты в экранные:
+            // screenX = logicalX * cellSize
+            // screenY = (mapHeight - 1 - logicalY) * cellSize
+            float screenX = logicalX * cellSize;
+            float screenY = (mapHeight - 1 - logicalY) * cellSize;
+            Vector2 newTarget = new Vector2(screenX, screenY);
             targetPositions.put(id, newTarget);
             targetDirections.put(id, dir);
             if (!visualPositions.containsKey(id)) {
@@ -73,7 +81,7 @@ public class GameScreen implements Screen {
         if (Gdx.input.isKeyPressed(Input.Keys.RIGHT)) mask |= 8;
         client.sendKeys(mask);
 
-        // Плавная интерполяция позиций
+        // Плавная интерполяция визуальных позиций
         for (Map.Entry<Integer, Vector2> entry : visualPositions.entrySet()) {
             int id = entry.getKey();
             Vector2 visual = entry.getValue();
@@ -95,8 +103,9 @@ public class GameScreen implements Screen {
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
 
-        // Карта
+        // Отрисовка карты: переворачиваем по Y
         for (int y = 0; y < mapData.getHeight(); y++) {
+            int screenY = (mapData.getHeight() - 1 - y) * cellSize;
             for (int x = 0; x < mapData.getWidth(); x++) {
                 TileType tile = mapData.getTile(x, y);
                 Texture tex = null;
@@ -104,23 +113,28 @@ public class GameScreen implements Screen {
                 else if (tile == TileType.GREEN_WALL) tex = greenBlock;
                 else if (tile == TileType.BLUE_WALL) tex = blueBlock;
                 if (tex != null) {
-                    batch.draw(tex, x * cellSize, y * cellSize, cellSize, cellSize);
+                    batch.draw(tex, x * cellSize, screenY, cellSize, cellSize);
                 }
             }
         }
 
-        // Пакманы с поворотом
+        // Отрисовка пакманов с учётом направления (коррекция поворота)
         for (Map.Entry<Integer, Vector2> entry : visualPositions.entrySet()) {
             int id = entry.getKey();
             Vector2 pos = entry.getValue();
-            int dir = targetDirections.getOrDefault(id, 1); // по умолчанию вправо
+            int logicalDir = targetDirections.getOrDefault(id, 1);
+
+            // Преобразуем логическое направление в экранный поворот:
+            // логическое: 0=вверх, 1=вправо, 2=вниз, 3=влево
+            // экранное:   вверх = поворот 90, вниз = поворот 270, влево = 180, вправо = 0
             float rotation = 0;
-            switch (dir) {
-                case 0: rotation = 90; break;   // вверх
-                case 1: rotation = 0; break;    // вправо
-                case 2: rotation = 270; break;  // вниз
-                case 3: rotation = 180; break;  // влево
+            switch (logicalDir) {
+                case 0: rotation = 90; break;   // вверх логически -> вниз экранно
+                case 1: rotation = 0; break;    // вправо -> вправо
+                case 2: rotation = 270; break;  // вниз логически -> вверх экранно
+                case 3: rotation = 180; break;  // влево -> влево
             }
+
             batch.draw(pacTex, pos.x, pos.y, cellSize/2f, cellSize/2f,
                     cellSize, cellSize, 1, 1, rotation, 0, 0,
                     pacTex.getWidth(), pacTex.getHeight(), false, false);
