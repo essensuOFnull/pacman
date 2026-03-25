@@ -9,5 +9,5 @@ echo Building server...
 call gradlew server:serverJar
 echo.
 echo Running server...
-java -jar server\build\libs\server-*.jar levels\level1.txt
+java -jar .\server\build\libs\server-1.0.0.jar
 pause

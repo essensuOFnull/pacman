@@ -9,5 +9,5 @@ echo Building client...
 call gradlew lwjgl3:dist
 echo.
 echo Running client...
-java -jar lwjgl3\build\libs\lwjgl3-*.jar
+java -jar .\client\lwjgl3\build\libs\PacmanGame-1.0.0.jar
 pause
