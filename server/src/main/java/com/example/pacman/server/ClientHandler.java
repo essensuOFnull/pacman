@@ -2,18 +2,20 @@ package com.example.pacman.server;
 
 import java.io.*;
 import java.net.Socket;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class ClientHandler implements Runnable {
-    private Socket socket;
-    private int playerId;
-    private GameLoop gameLoop;
+    private final Socket socket;
+    private final GameLoop gameLoop;
+    private final CopyOnWriteArrayList<ClientHandler> allClients;
     private PrintWriter out;
     private BufferedReader in;
+    private int playerId;
 
-    public ClientHandler(Socket socket, int playerId, GameLoop gameLoop) {
+    public ClientHandler(Socket socket, GameLoop gameLoop, CopyOnWriteArrayList<ClientHandler> allClients) {
         this.socket = socket;
-        this.playerId = playerId;
         this.gameLoop = gameLoop;
+        this.allClients = allClients;
     }
 
     @Override
@@ -22,29 +24,44 @@ public class ClientHandler implements Runnable {
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             out = new PrintWriter(socket.getOutputStream(), true);
 
-            String inputLine;
-            while ((inputLine = in.readLine()) != null) {
-                if (inputLine.startsWith("KEY:")) {
-                    // формат: KEY:direction:state
-                    String[] parts = inputLine.split(":");
-                    if (parts.length == 3) {
-                        String dir = parts[1];
-                        boolean pressed = "1".equals(parts[2]);
-                        gameLoop.setKeyState(playerId, dir, pressed);
-                    }
+            playerId = gameLoop.registerPlayer();
+            System.out.println("Player " + playerId + " registered.");
+
+            sendMap();
+
+            String line;
+            while ((line = in.readLine()) != null) {
+                if (line.startsWith("KEYS ")) {
+                    int mask = Integer.parseInt(line.substring(5));
+                    gameLoop.updateKeyMask(playerId, mask);
                 }
             }
         } catch (IOException e) {
-            System.err.println("Client " + playerId + " disconnected");
+            System.err.println("Client error: " + e.getMessage());
         } finally {
+            try { socket.close(); } catch (IOException e) { }
+            allClients.remove(this);
             gameLoop.removePlayer(playerId);
-            try {
-                socket.close();
-            } catch (IOException e) {}
+            System.out.println("Player " + playerId + " disconnected.");
         }
     }
 
-    public void sendState(String state) {
-        out.println(state);
+    private void sendMap() {
+        out.println("MAP " + gameLoop.getMapWidth() + " " + gameLoop.getMapHeight());
+        for (int y = 0; y < gameLoop.getMapHeight(); y++) {
+            StringBuilder line = new StringBuilder();
+            for (int x = 0; x < gameLoop.getMapWidth(); x++) {
+                line.append(gameLoop.getTileChar(x, y));
+            }
+            out.println(line.toString());
+        }
+        out.println("SPAWNS " + gameLoop.getSpawnPointsCount());
+        for (var p : gameLoop.getSpawnPoints()) {
+            out.println(p.x + " " + p.y);
+        }
+    }
+
+    public void sendUpdate(String update) {
+        out.println(update);
     }
 }

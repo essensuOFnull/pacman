@@ -1,127 +1,123 @@
 package com.example.pacman.screens;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
-import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.OrthographicCamera;
-import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.*;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.utils.viewport.FitViewport;
-import com.badlogic.gdx.utils.viewport.Viewport;
+import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.utils.ScreenUtils;
 import com.example.pacman.model.MapData;
-import com.example.pacman.model.PacmanState;
 import com.example.pacman.model.TileType;
 import com.example.pacman.network.NetworkClient;
-import com.example.pacman.util.MapLoader;
 
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
 public class GameScreen implements Screen {
-    private OrthographicCamera camera;
-    private Viewport viewport;
-    private SpriteBatch batch;
+    private final OrthographicCamera camera;
+    private final SpriteBatch batch;
+    private final NetworkClient client;
+    private MapData mapData;
+    private Texture redBlock, greenBlock, blueBlock, pacmanTexture;
+    private int cellSize = 32;
+    private Map<Integer, Vector2> visualPositions = new HashMap<>();
+    private Map<Integer, Integer> targetDirections = new HashMap<>();
+    private Map<Integer, Vector2> targetPositions = new HashMap<>();
+    private boolean mapLoaded = false;
 
-    private MapData map;
-    private Texture redTexture, greenTexture, blueTexture, pacmanTexture;
-    private Map<Integer, PacmanState> players = new HashMap<>();
-
-    private NetworkClient networkClient;
-
-    public GameScreen() {
-        // Загружаем карту из ресурсов (в assets)
-        try {
-            map = MapLoader.load("levels/level1.txt");
-        } catch (IOException e) {
-            e.printStackTrace();
-            // fallback
-        }
-
-        redTexture = new Texture("red_block.png");
-        greenTexture = new Texture("green_block.png");
-        blueTexture = new Texture("blue_block.png");
-        pacmanTexture = new Texture("libgdx.png"); // временно, потом заменить
-
-        // Настройка камеры
+    public GameScreen(NetworkClient client) {
+        this.client = client;
         camera = new OrthographicCamera();
-        viewport = new FitViewport(map.getWidth() * 32, map.getHeight() * 32, camera);
-        camera.position.set(viewport.getWorldWidth() / 2, viewport.getWorldHeight() / 2, 0);
         batch = new SpriteBatch();
-
-        // Подключаемся к серверу
-        networkClient = new NetworkClient("localhost", 12345, this);
-        networkClient.connect();
+        redBlock = new Texture("red_block.png");
+        greenBlock = new Texture("green_block.png");
+        blueBlock = new Texture("blue_block.png");
+        pacmanTexture = new Texture("libgdx.png"); // временно
     }
 
-    public void updatePlayerState(int id, int x, int y, int targetX, int targetY) {
-        PacmanState state = players.get(id);
-        if (state == null) {
-            state = new PacmanState(id, x, y);
-            players.put(id, state);
+    public void setMap(MapData map) {
+        this.mapData = map;
+        camera.setToOrtho(false, map.getWidth() * cellSize, map.getHeight() * cellSize);
+        mapLoaded = true;
+    }
+
+    public void updatePositions(String updateMsg) {
+        // Формат: "UPDATE id x y dir id x y dir ..."
+        String[] parts = updateMsg.split(" ");
+        for (int i = 1; i < parts.length; i += 4) {
+            int id = Integer.parseInt(parts[i]);
+            int x = Integer.parseInt(parts[i+1]);
+            int y = Integer.parseInt(parts[i+2]);
+            int dir = Integer.parseInt(parts[i+3]);
+            Vector2 newTarget = new Vector2(x * cellSize, y * cellSize);
+            targetPositions.put(id, newTarget);
+            targetDirections.put(id, dir);
+            if (!visualPositions.containsKey(id)) {
+                visualPositions.put(id, newTarget.cpy());
+            }
         }
-        state.x = x;
-        state.y = y;
-        state.targetX = targetX;
-        state.targetY = targetY;
     }
 
     @Override
     public void render(float delta) {
-        Gdx.gl.glClearColor(0, 0, 0, 1);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        if (!mapLoaded) return;
 
-        // Обновляем визуальные позиции всех пакманов
-        for (PacmanState p : players.values()) {
-            p.updateVisual(delta, 5.0f);
-        }
+        // Отправка нажатий
+        int mask = 0;
+        if (Gdx.input.isKeyPressed(Input.Keys.UP))    mask |= 1;
+        if (Gdx.input.isKeyPressed(Input.Keys.DOWN))  mask |= 2;
+        if (Gdx.input.isKeyPressed(Input.Keys.LEFT))  mask |= 4;
+        if (Gdx.input.isKeyPressed(Input.Keys.RIGHT)) mask |= 8;
+        client.sendKeys(mask);
 
-        camera.update();
-        batch.setProjectionMatrix(camera.combined);
-
-        batch.begin();
-        // Рисуем карту
-        for (int y = 0; y < map.getHeight(); y++) {
-            for (int x = 0; x < map.getWidth(); x++) {
-                TileType tile = map.getTile(x, y);
-                Texture tex = null;
-                switch (tile) {
-                    case RED_WALL: tex = redTexture; break;
-                    case GREEN_WALL: tex = greenTexture; break;
-                    case BLUE_WALL: tex = blueTexture; break;
-                    default: continue;
-                }
-                batch.draw(tex, x * 32, y * 32, 32, 32);
+        // Плавное перемещение визуальных позиций
+        for (Map.Entry<Integer, Vector2> entry : visualPositions.entrySet()) {
+            int id = entry.getKey();
+            Vector2 visual = entry.getValue();
+            Vector2 target = targetPositions.get(id);
+            if (target != null) {
+                visual.lerp(target, 0.2f);
+                if (visual.dst(target) < 0.1f) visual.set(target);
             }
         }
-        // Рисуем пакманов
-        for (PacmanState p : players.values()) {
-            batch.draw(pacmanTexture, p.visualX * 32, p.visualY * 32, 32, 32);
+
+        // Отрисовка
+        ScreenUtils.clear(0, 0, 0, 1);
+        camera.update();
+        batch.setProjectionMatrix(camera.combined);
+        batch.begin();
+
+        // Карта
+        for (int y = 0; y < mapData.getHeight(); y++) {
+            for (int x = 0; x < mapData.getWidth(); x++) {
+                TileType tile = mapData.getTile(x, y);
+                Texture tex = null;
+                if (tile == TileType.WALL) tex = redBlock; // можно выбирать по цвету
+                if (tex != null) {
+                    batch.draw(tex, x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
         }
+
+        // Пакманы
+        for (Vector2 pos : visualPositions.values()) {
+            batch.draw(pacmanTexture, pos.x, pos.y, cellSize, cellSize);
+        }
+
         batch.end();
-
-        // Отправляем нажатия клавиш на сервер
-        networkClient.updateKeys();
     }
 
-    @Override
-    public void resize(int width, int height) {
-        viewport.update(width, height);
-    }
-
-    @Override
-    public void dispose() {
-        batch.dispose();
-        redTexture.dispose();
-        greenTexture.dispose();
-        blueTexture.dispose();
-        pacmanTexture.dispose();
-        networkClient.dispose();
-    }
-
-    // остальные методы Screen оставляем пустыми
+    @Override public void resize(int width, int height) { camera.viewportWidth = width; camera.viewportHeight = height; camera.update(); }
     @Override public void show() {}
     @Override public void hide() {}
     @Override public void pause() {}
     @Override public void resume() {}
+    @Override public void dispose() {
+        batch.dispose();
+        redBlock.dispose();
+        greenBlock.dispose();
+        blueBlock.dispose();
+        pacmanTexture.dispose();
+    }
 }

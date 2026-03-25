@@ -1,24 +1,33 @@
 package com.example.pacman.model;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class MapData {
+    private final int width;
+    private final int height;
     private final TileType[][] tiles;
-    private final List<int[]> spawnPoints;
+    private final List<Point> spawnPoints;
 
-    public MapData(TileType[][] tiles, List<int[]> spawnPoints) {
+    public MapData(int width, int height, TileType[][] tiles, List<Point> spawnPoints) {
+        this.width = width;
+        this.height = height;
         this.tiles = tiles;
         this.spawnPoints = spawnPoints;
     }
 
-    public TileType getTile(int x, int y) {
-        if (y >= 0 && y < tiles.length && x >= 0 && x < tiles[0].length) {
-            return tiles[y][x];
-        }
-        return TileType.RED_WALL; // за пределами карты считаем стеной
+    public int getWidth() { return width; }
+    public int getHeight() { return height; }
+    public TileType getTile(int x, int y) { return tiles[y][x]; }
+    public List<Point> getSpawnPoints() { return spawnPoints; }
+
+    public boolean isWalkable(int x, int y) {
+        if (x < 0 || x >= width || y < 0 || y >= height) return false;
+        return tiles[y][x].isWalkable();
     }
 
-    public int getWidth() { return tiles[0].length; }
-    public int getHeight() { return tiles.length; }
-    public List<int[]> getSpawnPoints() { return spawnPoints; }
+    public static class Point {
+        public final int x, y;
+        public Point(int x, int y) { this.x = x; this.y = y; }
+    }
 }

@@ -1,134 +1,143 @@
 package com.example.pacman.server;
 
 import com.example.pacman.model.*;
+import com.example.pacman.util.MapLoader;
+import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 
-public class GameLoop {
-    private MapData map;
-    private Map<Integer, PacmanState> players = new ConcurrentHashMap<>();
-    private Map<Integer, ClientHandler> clients = new ConcurrentHashMap<>();
-    private ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+public class GameLoop extends Thread {
+    private final MapData map;
+    private final Map<Integer, PacmanState> players = new HashMap<>();
+    private final CopyOnWriteArrayList<ClientHandler> clients;
+    private int nextId = 1;
+    private boolean running = true;
 
-    public GameLoop(MapData map) {
-        this.map = map;
+    public GameLoop(String levelPath, CopyOnWriteArrayList<ClientHandler> clients) throws IOException {
+        this.map = MapLoader.load(levelPath);
+        this.clients = clients;
     }
 
-    public void start() {
-        scheduler.scheduleAtFixedRate(this::update, 0, 33, TimeUnit.MILLISECONDS); // ~30 fps
-    }
+    @Override
+    public void run() {
+        long lastTime = System.nanoTime();
+        double nsPerTick = 1_000_000_000.0 / 30.0;
+        double delta = 0;
 
-    public void addPlayer(int id, PacmanState state) {
-        players.put(id, state);
-    }
-
-    public void removePlayer(int id) {
-        players.remove(id);
-    }
-
-    public void setKeyState(int playerId, String dir, boolean pressed) {
-        PacmanState p = players.get(playerId);
-        if (p == null) return;
-        switch (dir) {
-            case "up": p.upPressed = pressed; break;
-            case "down": p.downPressed = pressed; break;
-            case "left": p.leftPressed = pressed; break;
-            case "right": p.rightPressed = pressed; break;
+        while (running) {
+            long now = System.nanoTime();
+            delta += (now - lastTime) / nsPerTick;
+            lastTime = now;
+            if (delta >= 1) {
+                update();
+                broadcastState();
+                delta--;
+            }
+            try { Thread.sleep(5); } catch (InterruptedException e) { break; }
         }
     }
 
     private void update() {
+        for (PacmanState pac : players.values()) movePacman(pac);
+    }
+
+    private void movePacman(PacmanState pac) {
+        int x = pac.getX();
+        int y = pac.getY();
+        boolean up = pac.isUpPressed();
+        boolean down = pac.isDownPressed();
+        boolean left = pac.isLeftPressed();
+        boolean right = pac.isRightPressed();
+
+        // Бег между стенками
+        if (left && right && !up && !down) {
+            int dir = pac.getDirection();
+            if (dir == 3) { // влево
+                if (map.isWalkable(x-1, y)) pac.setX(x-1);
+                else pac.setDirection(1);
+            } else if (dir == 1) {
+                if (map.isWalkable(x+1, y)) pac.setX(x+1);
+                else pac.setDirection(3);
+            }
+            return;
+        }
+        if (up && down && !left && !right) {
+            int dir = pac.getDirection();
+            if (dir == 0) {
+                if (map.isWalkable(x, y-1)) pac.setY(y-1);
+                else pac.setDirection(2);
+            } else if (dir == 2) {
+                if (map.isWalkable(x, y+1)) pac.setY(y+1);
+                else pac.setDirection(0);
+            }
+            return;
+        }
+
+        // Одновременные нажатия
+        if (up && left) {
+            if (map.isWalkable(x, y-1)) { pac.setY(y-1); pac.setDirection(0); }
+            else if (map.isWalkable(x-1, y)) { pac.setX(x-1); pac.setDirection(3); }
+            return;
+        }
+        if (up && right) {
+            if (map.isWalkable(x, y-1)) { pac.setY(y-1); pac.setDirection(0); }
+            else if (map.isWalkable(x+1, y)) { pac.setX(x+1); pac.setDirection(1); }
+            return;
+        }
+        if (down && left) {
+            if (map.isWalkable(x, y+1)) { pac.setY(y+1); pac.setDirection(2); }
+            else if (map.isWalkable(x-1, y)) { pac.setX(x-1); pac.setDirection(3); }
+            return;
+        }
+        if (down && right) {
+            if (map.isWalkable(x, y+1)) { pac.setY(y+1); pac.setDirection(2); }
+            else if (map.isWalkable(x+1, y)) { pac.setX(x+1); pac.setDirection(1); }
+            return;
+        }
+
+        // Одиночные направления
+        if (up && map.isWalkable(x, y-1)) { pac.setY(y-1); pac.setDirection(0); }
+        else if (down && map.isWalkable(x, y+1)) { pac.setY(y+1); pac.setDirection(2); }
+        else if (left && map.isWalkable(x-1, y)) { pac.setX(x-1); pac.setDirection(3); }
+        else if (right && map.isWalkable(x+1, y)) { pac.setX(x+1); pac.setDirection(1); }
+    }
+
+    private void broadcastState() {
+        StringBuilder sb = new StringBuilder("UPDATE");
         for (PacmanState p : players.values()) {
-            movePacman(p);
+            sb.append(" ").append(p.getId())
+              .append(" ").append(p.getX())
+              .append(" ").append(p.getY())
+              .append(" ").append(p.getDirection());
         }
-        // Отправляем состояния всем клиентам
-        StringBuilder sb = new StringBuilder();
-        for (PacmanState p : players.values()) {
-            sb.append("STATE:").append(p.id).append(":")
-              .append(p.x).append(":").append(p.y).append(":")
-              .append(p.targetX).append(":").append(p.targetY).append(";");
-        }
-        String fullState = sb.toString();
-        for (ClientHandler client : clients.values()) {
-            client.sendState(fullState);
-        }
+        String msg = sb.toString();
+        for (ClientHandler client : clients) client.sendUpdate(msg);
     }
 
-    private void movePacman(PacmanState p) {
-        // Определяем желаемое направление на основе нажатых клавиш
-        boolean up = p.upPressed;
-        boolean down = p.downPressed;
-        boolean left = p.leftPressed;
-        boolean right = p.rightPressed;
-
-        // Сначала проверяем, находится ли пакман в середине движения к клетке
-        // В этой реализации мы перемещаемся сразу на клетку, а анимацию делает клиент.
-        // Логика движения:
-        int dx = 0, dy = 0;
-        if (up && left && !down && !right) {
-            // Сначала пытаемся вверх, потом влево
-            if (canMove(p.x, p.y - 1)) {
-                dy = -1;
-            } else if (canMove(p.x - 1, p.y)) {
-                dx = -1;
-            }
-        } else if (up && right && !down && !left) {
-            if (canMove(p.x, p.y - 1)) {
-                dy = -1;
-            } else if (canMove(p.x + 1, p.y)) {
-                dx = 1;
-            }
-        } else if (down && left && !up && !right) {
-            if (canMove(p.x, p.y + 1)) {
-                dy = 1;
-            } else if (canMove(p.x - 1, p.y)) {
-                dx = -1;
-            }
-        } else if (down && right && !up && !left) {
-            if (canMove(p.x, p.y + 1)) {
-                dy = 1;
-            } else if (canMove(p.x + 1, p.y)) {
-                dx = 1;
-            }
-        } else if (left && right && !up && !down) {
-            // Бег между левой и правой стенками
-            if (canMove(p.x - 1, p.y) && canMove(p.x + 1, p.y)) {
-                // нужно определить направление
-                // здесь упростим: если можем идти влево, идём влево, иначе вправо
-                if (canMove(p.x - 1, p.y)) dx = -1;
-                else if (canMove(p.x + 1, p.y)) dx = 1;
-            } else {
-                // если в одну сторону нельзя, идём в другую
-                if (canMove(p.x - 1, p.y)) dx = -1;
-                else if (canMove(p.x + 1, p.y)) dx = 1;
-            }
-        } else if (up && down && !left && !right) {
-            // Бег между верхней и нижней стенками
-            if (canMove(p.x, p.y - 1) && canMove(p.x, p.y + 1)) {
-                if (canMove(p.x, p.y - 1)) dy = -1;
-                else if (canMove(p.x, p.y + 1)) dy = 1;
-            } else {
-                if (canMove(p.x, p.y - 1)) dy = -1;
-                else if (canMove(p.x, p.y + 1)) dy = 1;
-            }
-        } else {
-            // Одиночное направление
-            if (up && canMove(p.x, p.y - 1)) dy = -1;
-            else if (down && canMove(p.x, p.y + 1)) dy = 1;
-            else if (left && canMove(p.x - 1, p.y)) dx = -1;
-            else if (right && canMove(p.x + 1, p.y)) dx = 1;
-        }
-
-        if (dx != 0 || dy != 0) {
-            p.targetX = p.x + dx;
-            p.targetY = p.y + dy;
-            p.x = p.targetX;
-            p.y = p.targetY;
-        }
+    public synchronized int registerPlayer() {
+        int id = nextId++;
+        List<MapData.Point> spawns = map.getSpawnPoints();
+        MapData.Point spawn = spawns.get((id-1) % spawns.size());
+        players.put(id, new PacmanState(id, spawn.x, spawn.y));
+        return id;
     }
 
-    private boolean canMove(int x, int y) {
-        TileType tile = map.getTile(x, y);
-        return tile != TileType.RED_WALL && tile != TileType.GREEN_WALL && tile != TileType.BLUE_WALL;
+    public synchronized void updateKeyMask(int playerId, int mask) {
+        PacmanState pac = players.get(playerId);
+        if (pac != null) pac.setKeyMask(mask);
     }
+
+    public synchronized void removePlayer(int playerId) { players.remove(playerId); }
+
+    // Методы для отправки карты
+    public int getMapWidth() { return map.getWidth(); }
+    public int getMapHeight() { return map.getHeight(); }
+    public char getTileChar(int x, int y) {
+        TileType type = map.getTile(x, y);
+        if (type == TileType.EMPTY) return '.';
+        if (type == TileType.SPAWN) return 's';
+        return '#';
+    }
+    public List<MapData.Point> getSpawnPoints() { return map.getSpawnPoints(); }
+    public int getSpawnPointsCount() { return map.getSpawnPoints().size(); }
 }
