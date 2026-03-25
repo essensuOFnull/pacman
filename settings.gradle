@@ -1,0 +1,11 @@
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+
+rootProject.name = "PacmanGame"
+
+include 'core', 'lwjgl3', 'server'
+
+project(':core').projectDir = file('client/core')
+project(':lwjgl3').projectDir = file('client/lwjgl3')
+project(':server').projectDir = file('server')
