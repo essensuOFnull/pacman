@@ -26,6 +26,10 @@ public class GameScreen implements Screen {
     private Map<Integer, Vector2> targetPositions = new HashMap<>();
     private boolean mapLoaded = false;
 
+    private Texture[] pacmanFrames = new Texture[2];
+    private float animationTimer = 0;
+    private int currentFrame = 0;
+
     public GameScreen(NetworkClient client) {
         this.client = client;
         camera = new OrthographicCamera();
@@ -33,7 +37,9 @@ public class GameScreen implements Screen {
         redBlock = new Texture("red_block.png");
         greenBlock = new Texture("green_block.png");
         blueBlock = new Texture("blue_block.png");
-        pacmanTexture = new Texture("libgdx.png"); // временно
+
+        pacmanFrames[0] = new Texture("pacman0.png");
+        pacmanFrames[1] = new Texture("pacman1.png");
     }
 
     public void setMap(MapData map) {
@@ -100,6 +106,12 @@ public class GameScreen implements Screen {
             }
         }
 
+        animationTimer += delta;
+        if (animationTimer >= 0.2f) {
+            animationTimer = 0;
+            currentFrame = (currentFrame + 1) % 2;
+        }
+        Texture pacmanTexture = pacmanFrames[currentFrame];
         // Пакманы
         for (Vector2 pos : visualPositions.values()) {
             batch.draw(pacmanTexture, pos.x, pos.y, cellSize, cellSize);

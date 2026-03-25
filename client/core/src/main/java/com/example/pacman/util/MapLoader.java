@@ -14,18 +14,26 @@ public class MapLoader {
         try (BufferedReader br = new BufferedReader(new FileReader(path))) {
             String line;
             while ((line = br.readLine()) != null) {
-                line = line.trim();
+                line = line.trim().replace("\r", "");
                 if (!line.isEmpty()) lines.add(line);
             }
         }
         if (lines.isEmpty()) throw new IOException("Empty file");
+
         int height = lines.size();
-        int width = lines.get(0).length();
+        int width = lines.stream().mapToInt(String::length).max().orElse(0);
+        if (width == 0) throw new IOException("No content");
+
         TileType[][] tiles = new TileType[height][width];
         List<MapData.Point> spawnPoints = new ArrayList<>();
 
         for (int y = 0; y < height; y++) {
             String row = lines.get(y);
+            if (row.length() < width) {
+                row = row + " ".repeat(width - row.length());
+            } else if (row.length() > width) {
+                row = row.substring(0, width);
+            }
             for (int x = 0; x < width; x++) {
                 char c = row.charAt(x);
                 TileType type = TileType.fromChar(c);
